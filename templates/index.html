@@ -3,148 +3,162 @@
 <head>
   <meta charset="utf-8" />
   <title>Our Voice — Our Rights</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
+
 <body>
   <div class="container glass">
     <h1>हमारी आवाज़ || Our Voice</h1>
-    <p class="subtitle">Check MGNREGA performance for your district. Simple, large text and month-wise view.</p>
+    <p class="subtitle">
+      Check MGNREGA performance for your district. Simple, large text and month-wise view.
+    </p>
 
-    <form action="{{ url_for('district_page') }}" method="POST" id="mainForm" class="form">
-      <label class="label">State</label>
-      <select name="state_name" id="stateSelect" required>
-        <option value="">Select State</option>
-        {% for s in states %}
-          <option value="{{ s }}">{{ s }}</option>
-        {% endfor %}
-      </select>
+    <form action="{{ url_for('district_page') }}" method="POST" id="mainForm" class="form-container">
 
-      <label class="label">Financial Year</label>
-      <select name="fin_year" id="yearSelect" required>
-        <option value="2024-2025">2024-2025</option>
-        <option value="2023-2024">2023-2024</option>
-        <option value="2022-2023">2022-2023</option>
-      </select>
+      <div class="form-group">
+        <label for="stateSelect">State</label>
+        <select name="state_name" id="stateSelect" required>
+          <option value="">Select State</option>
+          {% for s in states %}
+            <option value="{{ s }}">{{ s }}</option>
+          {% endfor %}
+        </select>
+      </div>
 
-      <label class="label">District</label>
-      <select name="district" id="districtSelect" required>
-        <option value="">Select District</option>
-      </select>
-<button type="button" id="locateBtn" class="btn secondary">📍 Take My Location</button>
+      <div class="form-group">
+        <label for="yearSelect">Financial Year</label>
+        <select name="fin_year" id="yearSelect" required>
+          <option value="2024-2025">2024-2025</option>
+          <option value="2023-2024">2023-2024</option>
+          <option value="2022-2023">2022-2023</option>
+        </select>
+      </div>
 
-      <div style="margin-top:12px;">
+      <div class="form-group">
+        <label for="districtSelect">District</label>
+        <select name="district" id="districtSelect" required>
+          <option value="">Select District</option>
+        </select>
+      </div>
+
+      <div class="btn-row">
+        <button type="button" id="locateBtn" class="btn secondary">📍 Take My Location</button>
         <button type="submit" class="btn">Show Report</button>
       </div>
     </form>
 
-    <p class="hint">If your browser permits, we'll try to guess your district automatically.</p>
-<p id="detected" style="display:none; text-align:center; font-weight:bold; margin-top:10px; color:green;"></p>
-  
-</div>
-<script>
-  const districtData = JSON.parse('{{ district_data | tojson | safe }}');
-  const stateSelect = document.getElementById('stateSelect');
-  const districtSelect = document.getElementById('districtSelect');
-  const locateBtn = document.getElementById('locateBtn');
-  const detected = document.getElementById('detected');
+    <p class="hint">
+      If your browser permits, we'll try to guess your district automatically.
+    </p>
+    <p id="detected" style="display:none; text-align:center; font-weight:bold; margin-top:10px; color:green;"></p>
+  </div>
 
-  function populateDistrictsFor(stateName) {
-    districtSelect.innerHTML = '<option value="">Select District</option>';
-    if (!stateName) return;
-    const s = (districtData.states || []).find(x => x.state.toUpperCase() === stateName.toUpperCase());
-    if (!s) return;
-    s.districts.forEach(d => {
-      const opt = document.createElement('option');
-      opt.value = d;
-      opt.textContent = d;
-      districtSelect.appendChild(opt);
-    });
-  }
+  <script>
+    const districtData = JSON.parse('{{ district_data | tojson | safe }}');
+    const stateSelect = document.getElementById('stateSelect');
+    const districtSelect = document.getElementById('districtSelect');
+    const locateBtn = document.getElementById('locateBtn');
+    const detected = document.getElementById('detected');
 
-  stateSelect.addEventListener('change', e => populateDistrictsFor(e.target.value));
-
-  async function detectLocation() {
-    detected.style.display = "none";
-    locateBtn.disabled = true;
-    locateBtn.textContent = "📍 Detecting...";
-
-    if (!navigator.geolocation) {
-      alert("Geolocation not supported by your browser.");
-      locateBtn.disabled = false;
-      locateBtn.textContent = "📍 Take My Location";
-      return;
+    function populateDistrictsFor(stateName) {
+      districtSelect.innerHTML = '<option value="">Select District</option>';
+      if (!stateName) return;
+      const s = (districtData.states || []).find(x => x.state.toUpperCase() === stateName.toUpperCase());
+      if (!s) return;
+      s.districts.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d;
+        opt.textContent = d;
+        districtSelect.appendChild(opt);
+      });
     }
 
-    navigator.geolocation.getCurrentPosition(async position => {
-      const lat = position.coords.latitude;
-      const lon = position.coords.longitude;
+    stateSelect.addEventListener('change', e => populateDistrictsFor(e.target.value));
 
-      let district = null, state = null;
+    async function detectLocation() {
+      detected.style.display = "none";
+      locateBtn.disabled = true;
+      locateBtn.textContent = "📍 Detecting...";
 
-      // Fallback: GeoNames API
-      const geoNamesURL = `https://secure.geonames.org/findNearbyPlaceNameJSON?lat=${lat}&lng=${lon}&username=a987`;
-      console.log("GeoNames URL:", geoNamesURL);
-
-      try {
-        const res2 = await fetch(geoNamesURL);
-        const data2 = await res2.json();
-        if (data2.geonames && data2.geonames.length > 0) {
-          const place = data2.geonames[0];
-          district = place.adminName2;
-          state = state || place.adminName1;
-        }
-      } catch (err) {
-        console.warn("GeoNames failed:", err);
+      if (!navigator.geolocation) {
+        alert("Geolocation not supported by your browser.");
+        locateBtn.disabled = false;
+        locateBtn.textContent = "📍 Take My Location";
+        return;
       }
 
-      console.log("Detected State:", state, "District:", district);
+      navigator.geolocation.getCurrentPosition(async position => {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
 
-      if (state) {
-        const matchState = Array.from(stateSelect.options).find(
-          opt => opt.value.toUpperCase() === state.toUpperCase()
-        );
-        if (matchState) {
-          stateSelect.value = matchState.value;
-          stateSelect.dispatchEvent(new Event("change"));
-        } else {
-          console.warn("State not found in dropdown:", state);
-        }
-      }
+        let district = null, state = null;
+        const geoNamesURL = `https://secure.geonames.org/findNearbyPlaceNameJSON?lat=${lat}&lng=${lon}&username=a987`;
+        console.log("GeoNames URL:", geoNamesURL);
 
-      setTimeout(() => {
-        if (district) {
-          const match = Array.from(districtSelect.options).find(opt =>
-            opt.value.toUpperCase().includes(district.toUpperCase())
-          );
-          if (match) {
-            districtSelect.value = match.value;
-            detected.textContent = `✅ Detected: ${district}, ${state}`;
-            detected.style.display = "block";
-            locateBtn.textContent = "✅ Location Detected";
-          } else {
-            locateBtn.textContent = "❌ Try Again";
-            locateBtn.disabled = false;
+        try {
+          const res2 = await fetch(geoNamesURL);
+          const data2 = await res2.json();
+          if (data2.geonames && data2.geonames.length > 0) {
+            const place = data2.geonames[0];
+            district = place.adminName2;
+            state = state || place.adminName1;
           }
-        } else {
-          locateBtn.textContent = "❌ Try Again";
-          locateBtn.disabled = false;
+        } catch (err) {
+          console.warn("GeoNames failed:", err);
         }
-      }, 1000);
-    }, err => {
-      alert("Unable to access your location. Please check permissions.");
-      locateBtn.disabled = false;
-      locateBtn.textContent = "📍 Take My Location";
-    });
+
+        console.log("Detected State:", state, "District:", district);
+
+        if (state) {
+          const matchState = Array.from(stateSelect.options).find(
+            opt => opt.value.toUpperCase() === state.toUpperCase()
+          );
+          if (matchState) {
+            stateSelect.value = matchState.value;
+            stateSelect.dispatchEvent(new Event("change"));
+          } else {
+            console.warn("State not found in dropdown:", state);
+          }
+        }
+
+        setTimeout(() => {
+          if (district) {
+  const match = Array.from(districtSelect.options).find(opt =>
+    opt.value.toUpperCase().includes(district.toUpperCase())
+  );
+  if (match) {
+    districtSelect.value = match.value;
+    detected.textContent = `✅ Detected: ${district}, ${state}`;
+    detected.style.display = "block";
+    locateBtn.textContent = "✅ Location Detected";
+  } else {
+    detected.textContent = `✅ State detected: ${state}, but district not found. Please select manually.`;
+    detected.style.display = "block";
+    detected.style.color = "orange";
+    locateBtn.textContent = "⚠️ Partial Detection";
+    locateBtn.disabled = false;
   }
+} else if (state) {
+  detected.textContent = `✅ State detected: ${state}, but district not found. Please select manually.`;
+  detected.style.display = "block";
+  detected.style.color = "orange";
+  locateBtn.textContent = "⚠️ Partial Detection";
+  locateBtn.disabled = false;
+} else {
+  locateBtn.textContent = "❌ Try Again";
+  locateBtn.disabled = false;
+}
 
-  locateBtn.addEventListener('click', detectLocation);
-</script>
+        }, 1000);
+      }, err => {
+        alert("Unable to access your location. Please check permissions.");
+        locateBtn.disabled = false;
+        locateBtn.textContent = "📍 Take My Location";
+      });
+    }
 
-
-
-
-
+    locateBtn.addEventListener('click', detectLocation);
+  </script>
 </body>
 </html>
-
