@@ -70,3 +70,11 @@ select {
 .report-table th { background: rgba(0,0,0,0.06); font-weight:700; }
 
 .muted { color: rgba(0,0,0,0.55); font-size:14px; }
+.btn.secondary {
+  background: linear-gradient(90deg, #2b9ebb, #007a9e);
+  font-weight: 600;
+  margin-top: 6px;
+}
+.btn.secondary:hover {
+  background: linear-gradient(90deg, #3aaed8, #009acc);
+}
