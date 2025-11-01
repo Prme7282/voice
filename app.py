@@ -1,85 +1,105 @@
 import os
-import json
 import time
+import json
 import requests
 from urllib.parse import urlencode, quote_plus
 from flask import Flask, render_template, request, jsonify, redirect, url_for
+from dotenv import load_dotenv
+from pymongo import MongoClient, UpdateOne
 
+load_dotenv()
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
-# --- Config ---
+# MongoDB setup
+mongo_uri = os.getenv("MONGO_URI")
+db_name = os.getenv("DB_NAME")
+
+client = MongoClient(mongo_uri)
+db = client[db_name]
+cache_collection = db["cache"]
+district_collection = db["districts"]
+
+# Config
 API_BASE = "https://api.data.gov.in/resource/ee03643a-ee4c-48c2-ac30-9f2ff26ab722"
-API_KEY = os.environ.get("MGNREGA_API_KEY")
-DATA_DIR = "data"
-CACHE_FILE = os.path.join(DATA_DIR, "cache.json")
-DISTRICT_FILE = os.path.join(DATA_DIR, "district.json")
-# API requires limit < 1000; use 999
-API_PAGE_LIMIT = 999
-CACHE_TTL_SECONDS = 24 * 3600  # treat cache as fresh for 24 hours
+API_KEY = os.getenv("MGNREGA_API_KEY")
+API_PAGE_LIMIT = 10000
+CACHE_TTL_SECONDS = 24 * 3600  # 24h
 
-os.makedirs(DATA_DIR, exist_ok=True)
-
-# create cache file if missing
-if not os.path.exists(CACHE_FILE):
-    with open(CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump({}, f)
-
-# ensure district file exists (user supplied file should overwrite this if present)
-if not os.path.exists(DISTRICT_FILE):
-    with open(DISTRICT_FILE, "w", encoding="utf-8") as f:
-        json.dump({"states": []}, f, indent=2)
-
-
-def read_json(path):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
-
-
-def write_json_atomic(path, data):
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-    os.replace(tmp, path)
-
-
-def load_cache():
-    c = read_json(CACHE_FILE)
-    if c is None:
-        return {}
-    return c
-
-
-def save_cache(cache):
-    write_json_atomic(CACHE_FILE, cache)
-
-
-def load_districts():
-    d = read_json(DISTRICT_FILE)
-    if d is None:
-        return {"states": []}
-    return d
-
-
-def save_districts(district_data):
-    write_json_atomic(DISTRICT_FILE, district_data)
-
-
+# -------------------------------------------
+# Utility: API URL builder
+# -------------------------------------------
 def build_api_url(params: dict) -> str:
-    # build url string for debugging / logs as user requested earlier
     q = urlencode(params, doseq=True, quote_via=quote_plus)
     return f"{API_BASE}?{q}"
 
 
-def fetch_state_year_all(state_name: str, fin_year: str):
-    """
-    Fetch all pages for given state_name and fin_year.
-    Return list of raw records (list of dicts).
-    Update district.json if new district names found.
-    Cache will be updated by caller.
-    """
+# -------------------------------------------
+# District Helpers
+# -------------------------------------------
+def load_districts():
+    """Load all states and their districts from MongoDB."""
+    docs = list(district_collection.find({}, {"_id": 0}))
+    if not docs:
+        return {"states": []}
+
+    if "states" in docs[0]:
+        return {"states": docs[0]["states"]}
+    return {"states": docs}
+
+
+def save_districts(state_name, districts):
+    """Upsert district data for a state."""
+    district_collection.update_one(
+        {"state": state_name.strip()},
+        {"$set": {"state": state_name.strip(), "districts": sorted(districts)}},
+        upsert=True
+    )
+
+
+# -------------------------------------------
+# Cache Helpers
+# -------------------------------------------
+def save_cache(state, fin_year, grouped, total_records):
+    """Save or update each district's cache as a separate document."""
+    operations = []
+    for district, records in grouped.items():
+        operations.append(UpdateOne(
+            {"state": state.upper(), "fin_year": fin_year, "district": district},
+            {"$set": {
+                "records": records,
+                "fetched_at": int(time.time())
+            }},
+            upsert=True
+        ))
+    if operations:
+        cache_collection.bulk_write(operations)
+    print(f"✅ Saved {len(operations)} district caches for {state} {fin_year}")
+
+
+def get_cache(state, fin_year):
+    """Return grouped cache by district from MongoDB."""
+    docs = list(cache_collection.find(
+        {"state": state.upper(), "fin_year": fin_year},
+        {"_id": 0, "district": 1, "records": 1, "fetched_at": 1}
+    ))
+
+    if not docs:
+        return None
+
+    grouped = {doc["district"]: doc["records"] for doc in docs}
+    total_records = sum(len(doc["records"]) for doc in docs)
+
+    fetched_at = docs[0].get("fetched_at", 0)
+    if time.time() - fetched_at < CACHE_TTL_SECONDS:
+        return {"by_district": grouped, "total_records": total_records}
+    return None
+
+
+# -------------------------------------------
+# Fetch State-Year Data (fetch all districts at once)
+# -------------------------------------------
+def fetch_state_year_all(state_name, fin_year):
+    """Fetch all district records for a given state & year."""
     state_u = state_name.strip().upper()
     fin_u = fin_year.strip()
 
@@ -96,80 +116,55 @@ def fetch_state_year_all(state_name: str, fin_year: str):
             "filters[fin_year]": fin_u,
         }
         url = build_api_url(params)
-        print("Hitting API:", url)
+        print("🔗 Hitting API:", url)
 
         try:
             resp = requests.get(API_BASE, params=params, timeout=20)
+            resp.raise_for_status()
         except Exception as e:
-            print("API request failed:", e)
-            break
-
-        if resp.status_code != 200:
-            print("API returned non-200:", resp.status_code, resp.text[:400])
+            print("❌ API request failed:", e)
             break
 
         j = resp.json()
         records = j.get("records", [])
-        count = int(j.get("count", len(records)))
-        total = int(j.get("total", len(records)))
+        if not records:
+            break
 
         all_records.extend(records)
+        offset += len(records)
 
-        # update district.json with any new district names
-        try:
-            district_data = load_districts()
-            # find or create state entry (match ignoring case)
-            sd = None
-            for s in district_data.get("states", []):
-                if s.get("state", "").strip().upper() == state_u:
-                    sd = s
-                    break
-            if sd is None:
-                sd = {"state": state_name, "districts": []}
-                district_data.setdefault("states", []).append(sd)
-
-            changed = False
-            for r in records:
-                # API field is 'district_name' (based on samples)
-                dname = (r.get("district_name") or r.get("district") or "").strip()
-                if dname and dname not in sd["districts"]:
-                    sd["districts"].append(dname)
-                    changed = True
-            if changed:
-                # sort district names for nicer UI
-                sd["districts"] = sorted(sd["districts"], key=lambda x: x.upper())
-                save_districts(district_data)
-        except Exception as e:
-            print("update district.json failed:", e)
-
-        # determine stopping condition
-        # total from API tells us how many records exist
+        total = int(j.get("total", len(all_records)))
         if len(all_records) >= total:
             break
-        if count == 0:
-            break
 
-        offset += count
-        # polite wait to avoid hitting rate limits
         time.sleep(0.2)
+
+    # Extract & save district list
+    try:
+        districts = list({
+            (r.get("district_name") or r.get("district") or "").strip()
+            for r in all_records if (r.get("district_name") or r.get("district"))
+        })
+        if districts:
+            save_districts(state_name, districts)
+    except Exception as e:
+        print("⚠️ District update failed:", e)
 
     return all_records
 
 
-def build_cache_for_state_year(state_name: str, fin_year: str):
-    """Fetch and persist cache grouped by district_name for quick lookups."""
-    key = f"{state_name.strip().upper()}||{fin_year.strip()}"
-    cache = load_cache()
+# -------------------------------------------
+# Build Cache (fetch and store all districts for the state)
+# -------------------------------------------
+def build_cache_for_state_year(state_name, fin_year):
+    """Build cache for all districts in a state for a specific year."""
+    existing = get_cache(state_name, fin_year)
+    if existing:
+        return existing
 
-    # if present and fresh, return existing
-    if key in cache:
-        meta = cache[key].get("_meta", {})
-        fetched_at = meta.get("fetched_at", 0)
-        if time.time() - fetched_at < CACHE_TTL_SECONDS:
-            return cache[key]
-
+    print(f"⚙️ Building cache for state={state_name}, year={fin_year} ...")
     records = fetch_state_year_all(state_name, fin_year)
-    # group records by district_name (uppercased key for matching)
+
     grouped = {}
     for r in records:
         d = (r.get("district_name") or r.get("district") or "").strip()
@@ -178,26 +173,17 @@ def build_cache_for_state_year(state_name: str, fin_year: str):
         d_u = d.upper()
         grouped.setdefault(d_u, []).append(r)
 
-    # store compact metadata
-    cache[key] = {
-        "_meta": {
-            "state": state_name.strip(),
-            "fin_year": fin_year.strip(),
-            "fetched_at": int(time.time()),
-            "total_records": len(records)
-        },
-        "by_district": grouped
-    }
-    save_cache(cache)
-    return cache[key]
+    save_cache(state_name, fin_year, grouped, len(records))
+    return get_cache(state_name, fin_year)
 
 
+# -------------------------------------------
+# Routes
+# -------------------------------------------
 @app.route("/")
 def index():
-    # Pass district.json (full object) to page
     district_data = load_districts()
     states = [s.get("state") for s in district_data.get("states", [])]
-    # pass states list and full district data
     return render_template("index.html", states=states, district_data=district_data)
 
 
@@ -210,75 +196,72 @@ def district_page():
     if not state or not fin_year or not district:
         return redirect(url_for("index"))
 
-    # ensure cache exists for state-year (fetch if missing)
-    key = f"{state.strip().upper()}||{fin_year.strip()}"
-    cache = load_cache()
-    if key not in cache:
-        # fetch & build cache (this may take a few seconds)
-        build_cache_for_state_year(state, fin_year)
-        cache = load_cache()
+    entry = build_cache_for_state_year(state, fin_year)
+    found = entry.get("by_district", {}).get(district.strip().upper(), [])
 
-    entry = cache.get(key)
-    found = None
-    if entry:
-        # matching by uppercase district name
-        found = entry.get("by_district", {}).get(district.strip().upper())
+    # Save for debugging
+    with open("a.json", "w", encoding="utf-8") as f:
+        json.dump(found, f, ensure_ascii=False, indent=4)
 
-    # If not found in cache (maybe district naming mismatch), try to fetch again and perform fuzzy match
     if not found:
-        # fetch fresh
-        entry = build_cache_for_state_year(state, fin_year)
-        # try exact again
-        found = entry.get("by_district", {}).get(district.strip().upper())
-        if not found:
-            # try case-insensitive contains matching
-            for dkey, recs in entry.get("by_district", {}).items():
-                if district.strip().upper() in dkey:
-                    found = recs
-                    break
+        for dkey, recs in entry.get("by_district", {}).items():
+            if district.strip().upper() in dkey:
+                found = recs
+                break
 
-    # Prepare simple summary for low-literacy users (choose latest month record for headline)
-    summary = None
-    if found:
-        # sort by month info if present (we'll try to present latest by 'month' field + fin_year)
-        # We will rely on the returned records order; otherwise sort by month name mapping if required.
-        latest = found[0]
-        # Try find record with the latest 'month' (if month present)
+    # --- Compute monthly averages ---
+    month_order = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,
+                   "Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
+    monthly = {}
+
+    for r in found:
+        month = (r.get("month") or "").strip().title()[:3]
+        if not month:
+            continue
+        mkey = month
         try:
-            # If month values are strings like 'Jan', 'Feb', map to numbers
-            month_order = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,"Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
-            def month_idx(rec):
-                m = (rec.get("month") or "").strip()[:3].title()
-                return month_order.get(m, 0)
-            latest = sorted(found, key=month_idx, reverse=True)[0]
-        except Exception:
-            latest = found[0]
+            hh = float(r.get("Total_Households_Worked") or 0)
+            ind = float(r.get("Total_Individuals_Worked") or 0)
+            pers = float(r.get("Persondays_of_Central_Liability_so_far") or 0)
+            wages = float(r.get("Wages") or 0)
+            avg_days = float(r.get("Average_days_of_employment_provided_per_Household") or 0)
+        except ValueError:
+            continue
 
-        # sensible fields for quick display (fall back to keys that might exist)
-        summary = {
-            "month": latest.get("month") or latest.get("Month") or "",
-            "fin_year": latest.get("fin_year") or "",
-            "total_households": latest.get("Total_Households_Worked") or latest.get("Total Households Worked") or "",
-            "total_individuals": latest.get("Total_Individuals_Worked") or latest.get("Total Individuals Worked") or "",
-            "persondays": latest.get("Persondays_of_Central_Liability_so_far") or latest.get("Persondays_of_Central_Liability_so_far") or "",
-            "wages": latest.get("Wages") or latest.get("Wages(in lakhs?)") or "",
-            "avg_days_per_hh": latest.get("Average_days_of_employment_provided_per_Household") or ""
-        }
+        monthly.setdefault(mkey, {"hh": [], "ind": [], "pers": [], "wages": [], "avg_days": []})
+        monthly[mkey]["hh"].append(hh)
+        monthly[mkey]["ind"].append(ind)
+        monthly[mkey]["pers"].append(pers)
+        monthly[mkey]["wages"].append(wages)
+        monthly[mkey]["avg_days"].append(avg_days)
+
+    averaged = []
+    for m, vals in sorted(monthly.items(), key=lambda x: month_order.get(x[0], 0)):
+        averaged.append({
+            "month": m,
+            "Total_Households_Worked": round(sum(vals["hh"]) / len(vals["hh"]), 2),
+            "Total_Individuals_Worked": round(sum(vals["ind"]) / len(vals["ind"]), 2),
+            "Persondays_of_Central_Liability_so_far": round(sum(vals["pers"]) / len(vals["pers"]), 2),
+            "Wages": round(sum(vals["wages"]) / len(vals["wages"]), 2),
+            "Average_days_of_employment_provided_per_Household": round(sum(vals["avg_days"]) / len(vals["avg_days"]), 2)
+        })
+
+    # --- Build latest summary ---
+    summary = averaged[-1] if averaged else None
+    if summary:
+        summary["fin_year"] = fin_year
 
     return render_template("district.html",
                            state=state,
                            fin_year=fin_year,
                            district=district,
-                           records=found,
+                           records=averaged,
                            summary=summary)
+
 
 
 @app.route("/api/preview")
 def api_preview():
-    """
-    Debug endpoint to show the actual API url that would be hit for given state/fin_year/offset/limit.
-    Example: /api/preview?state=ANDHRA%20PRADESH&fin_year=2024-2025&limit=999&offset=0
-    """
     state = request.args.get("state", "")
     fin_year = request.args.get("fin_year", "")
     limit = int(request.args.get("limit", API_PAGE_LIMIT))
@@ -295,11 +278,4 @@ def api_preview():
 
 
 if __name__ == "__main__":
-    # ensure files exist
-    if not os.path.exists(DISTRICT_FILE):
-        write_json_atomic(DISTRICT_FILE, {"states": []})
-    if not os.path.exists(CACHE_FILE):
-        write_json_atomic(CACHE_FILE, {})
-
-    # Run
     app.run(host="0.0.0.0", port=8080, debug=True)
