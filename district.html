@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>{{ district }} — Report</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+</head>
+<body>
+  <div class="container glass">
+    <a class="back" href="{{ url_for('index') }}">← Back</a>
+    <h1>{{ district }}</h1>
+    <h3 class="muted">{{ state }} — {{ fin_year }}</h3>
+
+    {% if not records %}
+      <div class="no-data">
+        <p>No data found for <strong>{{ district }}</strong> in <strong>{{ state }}</strong> ({{ fin_year }})</p>
+        <p class="muted">We tried cache & API. If you think the district exists, try another year or refresh later.</p>
+      </div>
+    {% else %}
+      <!-- summary for low literacy users -->
+      <div class="summary">
+        <div class="big">
+          <div>
+            <div class="label">Latest month</div>
+            <div class="value">{{ summary.month or '—' }}</div>
+          </div>
+          <div>
+            <div class="label">Households worked</div>
+            <div class="value">{{ summary.total_households }}</div>
+          </div>
+          <div>
+            <div class="label">Individuals</div>
+            <div class="value">{{ summary.total_individuals }}</div>
+          </div>
+        </div>
+        <div class="small">
+          <div><strong>Persondays</strong>: {{ summary.persondays }}</div>
+          <div><strong>Avg days/HH</strong>: {{ summary.avg_days_per_hh }}</div>
+        </div>
+      </div>
+
+      <!-- month-wise table simplified -->
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>Month</th>
+            <th>HH Worked</th>
+            <th>Individuals</th>
+            <th>Wages</th>
+            <th>Avg days/HH</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in records %}
+            <tr>
+              <td>{{ r.get('month') or r.get('Month') or 'NA' }}</td>
+              <td>{{ r.get('Total_Households_Worked') or r.get('Total Households Worked') or '—' }}</td>
+              <td>{{ r.get('Total_Individuals_Worked') or r.get('Total Individuals Worked') or '—' }}</td>
+              <td>{{ r.get('Wages') or r.get('Wages(in lakhs?)') or '—' }}</td>
+              <td>{{ r.get('Average_days_of_employment_provided_per_Household') or '—' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+</body>
+</html>
