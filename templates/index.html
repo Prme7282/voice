@@ -43,17 +43,16 @@
 </div>
 
 <script>
+  // Injected safely as JSON
   const districtData = JSON.parse('{{ district_data | tojson | safe }}');
+
   const stateSelect = document.getElementById('stateSelect');
   const districtSelect = document.getElementById('districtSelect');
-  const detected = document.getElementById('detected');
 
   function populateDistrictsFor(stateName) {
     districtSelect.innerHTML = '<option value="">Select District</option>';
     if (!stateName) return;
-    const s = (districtData.states || []).find(
-      x => x.state.toUpperCase() === stateName.toUpperCase()
-    );
+    const s = (districtData.states || []).find(x => x.state.toUpperCase() === stateName.toUpperCase());
     if (!s) return;
     s.districts.forEach(d => {
       const opt = document.createElement('option');
@@ -63,17 +62,18 @@
     });
   }
 
-  stateSelect.addEventListener('change', e => populateDistrictsFor(e.target.value));
+  stateSelect.addEventListener('change', (e) => populateDistrictsFor(e.target.value));
 
-  async function detectLocation() {
-    if (!navigator.geolocation) return;
-
-    navigator.geolocation.getCurrentPosition(async pos => {
-      const lat = pos.coords.latitude;
-      const lon = pos.coords.longitude;
+  // --- Unified Auto Location Detection ---
+// Detect user location and auto-select using Nominatim + GeoNames fallback
+async function detectLocation() {
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(async position => {
+      const lat = position.coords.latitude;
+      const lon = position.coords.longitude;
 
       const nominatimURL = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`;
-      console.log("Nominatim API:", nominatimURL);
+      console.log("Nominatim API URL:", nominatimURL);
 
       let district = null, state = null;
 
@@ -91,15 +91,17 @@
         console.warn("Nominatim failed:", err);
       }
 
+      // Fallback: use GeoNames if district is missing
       if (!district) {
-        const geoNamesURL = `https://secure.geonames.org/findNearbyPlaceNameJSON?lat=${lat}&lng=${lon}&username=demo`;
-        console.log("GeoNames API:", geoNamesURL);
+        const geoNamesURL = `https://secure.geonames.org/findNearbyPlaceNameJSON?lat=${lat}&lng=${lon}&username=demo`; 
+        // 🔁 replace 'demo' with your GeoNames username
+        console.log("GeoNames API URL:", geoNamesURL);
         try {
           const res2 = await fetch(geoNamesURL);
           const data2 = await res2.json();
-          if (data2.geonames?.length > 0) {
+          if (data2.geonames && data2.geonames.length > 0) {
             const place = data2.geonames[0];
-            district = place.adminName2;
+            district = place.adminName2; // district equivalent
             state = state || place.adminName1;
           }
         } catch (err) {
@@ -107,38 +109,25 @@
         }
       }
 
-      console.log("Detected:", state, district);
+      console.log("Detected State:", state, "District:", district);
 
-      if (state) {
-        // find closest match for the state
-        const stateMatch = Array.from(stateSelect.options).find(opt =>
-          opt.value.toUpperCase().includes(state.toUpperCase())
-        );
-        if (stateMatch) {
-          stateSelect.value = stateMatch.value;
-          populateDistrictsFor(stateMatch.value);
+      if (state) stateSelect.value = state.toUpperCase();
+      stateSelect.dispatchEvent(new Event("change"));
 
-          // Wait until districts are populated, then select district
-          setTimeout(() => {
-            if (district) {
-              const districtMatch = Array.from(districtSelect.options).find(opt =>
-                opt.value.toUpperCase().includes(district.toUpperCase())
-              );
-              if (districtMatch) {
-                districtSelect.value = districtMatch.value;
-                detected.textContent = `📍 Detected: ${districtMatch.value}, ${stateMatch.value}`;
-                detected.style.display = "block";
-              }
-            }
-          }, 800);
+      setTimeout(() => {
+        if (district) {
+          const match = Array.from(districtSelect.options).find(opt =>
+            opt.value.toUpperCase().includes(district.toUpperCase())
+          );
+          if (match) districtSelect.value = match.value;
         }
-      }
+      }, 1000);
     });
   }
+}
 
   window.onload = detectLocation;
 </script>
-
 
 
 
