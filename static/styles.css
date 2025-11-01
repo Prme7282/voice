@@ -78,3 +78,68 @@ select {
 .btn.secondary:hover {
   background: linear-gradient(90deg, #3aaed8, #009acc);
 }
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+}
+
+.btn-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.btn {
+  padding: 10px 18px;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+  color: white;
+  background: linear-gradient(to right, #00c6ff, #0072ff);
+  transition: 0.3s ease;
+}
+
+.btn:hover {
+  opacity: 0.9;
+}
+
+.btn.secondary {
+  background: #004f7d;
+}
+.form-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 400px;
+  margin: 0 auto;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.form-group label {
+  font-weight: 600;
+  margin-bottom: 5px;
+  margin-left: 5px;
+  color: #0b3d3d;
+}
+
+.form-group select {
+  padding: 10px;
+  border-radius: 10px;
+  border: none;
+  background: #ffffffcc;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  font-size: 15px;
+}
+.form-group select:focus {
+  outline: 2px solid #00c6ff;
+}
