@@ -186,6 +186,9 @@ def index():
     states = [s.get("state") for s in district_data.get("states", [])]
     return render_template("index.html", states=states, district_data=district_data)
 
+@app.route("/ping")
+def ping():
+    return "OK", 200
 
 @app.route("/district", methods=["POST"])
 def district_page():
