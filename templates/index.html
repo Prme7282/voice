@@ -9,7 +9,11 @@
 <body>
   <div class="container glass">
     <h1>हमारी आवाज़ — Our Voice</h1>
-    <p class="subtitle">Check MGNREGA performance for your district. Simple, large text and month-wise view.</p>
+    <!-- <p class="subtitle">Check MGNREGA performance for your district. Simple, large text and month-wise view.</p> -->
+    <p class="subtitle">
+      View MGNREGA performance for your district in <strong>Madhya Pradesh</strong> 🇮🇳  
+      <br>Optimized for faster fetch and simpler monthly view.
+    </p>
 
     <form action="{{ url_for('district_page') }}" method="POST" id="mainForm" class="form">
       <label class="label">State</label>
@@ -133,3 +137,4 @@ async function detectLocation() {
 
 </body>
 </html>
+
